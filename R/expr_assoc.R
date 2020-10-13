@@ -126,7 +126,7 @@
 cnvEQTL <- function(cnvrs, calls, rcounts, data,
     window="1Mbp", multi.calls=.largest,
     min.samples=10, de.method=c("edgeR", "limma"),
-    padj.method="BH", filter.by.expr=TRUE, verbose=FALSE)
+    padj.method="BH", filter.by.expr=TRUE, verbose=FALSE, TN=colData(rcounts)$TN)
 {
     if (!missing(data)) {
         stopifnot(is(data, "MultiAssayExperiment"))
@@ -166,7 +166,7 @@ cnvEQTL <- function(cnvrs, calls, rcounts, data,
     }
     # filter and norm RNA-seq data
     if(verbose) message("Preprocessing RNA-seq data ...")
-    y <- .preprocRnaSeq(SummarizedExperiment::assay(rcounts), filter.by.expr)
+    y <- .preprocRnaSeq(rcounts, filter.by.expr)
     rcounts <- rcounts[rownames(y),]
 
     # determine states
@@ -207,7 +207,8 @@ cnvEQTL <- function(cnvrs, calls, rcounts, data,
             if(verbose) message(paste(i, "of", nr.cnvrs))
             r <- .testCnvExpr(y, cgenes[[i]], cnv.states[i,],
                                 min.state.freq=min.samples,
-                                de.method=de.method)
+                              de.method=de.method,
+                              TN=TN)
             return(r)
         })
     lens <- rep(cnvr.grid, lengths(cgenes))
@@ -300,7 +301,7 @@ plotEQTL <- function(cnvr, genes, genome, cn="CN1")
 
 # test a single cnv region
 .testCnvExpr <- function(y, cgenes, states, min.state.freq=10,
-    de.method=c("limma", "edgeR"))
+    de.method=c("limma", "edgeR"),TN="")
 {
     # form groups according to CNV states
     state.freq <- table(states)
@@ -322,7 +323,8 @@ plotEQTL <- function(cnvr, genes, genome, cn="CN1")
     s <- paste0("s", ifelse(s <= 0, "-", "+"), abs(s))
     group <- as.factor(s)
     y$samples$group <- group
-    f <- stats::formula(paste0("~", "group"))
+    TN <- y$samples$TN
+    f <- stats::formula(paste0("~", "group+TN"))
     design <- stats::model.matrix(f)
 
     # test
@@ -435,14 +437,17 @@ plotEQTL <- function(cnvr, genes, genome, cn="CN1")
 }
 
 # filter low exprs
-.preprocRnaSeq <- function(rcounts, filter.by.expr=TRUE)
+.preprocRnaSeq <- function(rinput, filter.by.expr=TRUE)
 {
+    rcounts <- SummarizedExperiment::assay(rinput)
+    
     if(filter.by.expr)
     {
         keep <- suppressMessages(edgeR::filterByExpr(rcounts))
         rcounts <- rcounts[keep,]
     }
-    y <- edgeR::DGEList(counts=rcounts)
+    y <- edgeR::DGEList(counts=rcounts,
+                        samples=data.frame(row.names=colnames(rinput), "TN"=rinput$TN))
     y <- edgeR::calcNormFactors(y)
     return(y)
 }
